@@ -1,4 +1,4 @@
-# Data Dictionary for loanrepayment_data_analysis Dat
+# Data Dictionary for loanrepayment_data_analysis
 
 **Account_Number** - account number of a loan<br/>
 **Customer_ID**	- borrower identifier<br/>
