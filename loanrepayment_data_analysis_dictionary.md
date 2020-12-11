@@ -1,7 +1,6 @@
-# loanrepayment_data_analysis
-## Data dictionary of following values:
+# Data Dictionary for loanrepayment_data_analysis Dat
 
-Account_Number - account number of a loan<br/>
+*Account_Number* - account number of a loan<br/>
 Customer_ID	- borrower identifier<br/>
 As_Of_Dt	- date of observation<br/>
 Default	- dummy variable: 1 - loan defaulted in current year, 0 - otherwise; default is defined as a loan account that is 10 months delinquent<br/>
