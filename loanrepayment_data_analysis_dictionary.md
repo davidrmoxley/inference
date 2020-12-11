@@ -2,7 +2,7 @@
 Data dictionary of following values:
 
 Account_Number - account number of a loan
-Customer_ID	- borrower identifier
+<br/>Customer_ID	- borrower identifier
 As_Of_Dt	- date of observation
 Default	- dummy variable: 1 - loan defaulted in current year, 0 - otherwise; default is defined as a loan account that is 10 months delinquent
 Join_Date	- date borrower joined the bank
