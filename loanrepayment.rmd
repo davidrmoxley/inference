@@ -1,0 +1,253 @@
+############################################################
+##                                                        ##
+##                    Data Cleanse                        ##
+##                                                        ##
+############################################################
+
+library(dplyr)
+
+file_path_data <- "C:/Users/dmoxley/OneDrive - Impact Makers/Pro Bono/RHFCU/Datasets"
+setwd(file_path_data)
+df <- read.csv(paste0("loan_data_clear.csv"))
+
+#Clean up dates
+cleanDate <- function(date_col){
+  #given date column from RHFCU file, clean broken dates and return formated date
+  c <- gsub("/"," ",date_col)
+  c <- trimws(date_col, which = c("right"), whitespace = "[ \t\r\n]")
+  c <- gsub(" ","/",date_col)
+  c <- as.Date(date_col, "%m/%d/%Y")
+  return(c)
+}
+
+# Clean-Up Birth_Date
+df$Birth_Date <- gsub("/"," ",df$Birth_Date)
+df$Birth_Date <- trimws(df$Birth_Date, which = c("right"), whitespace = "[ \t\r\n]")
+df$Birth_Date <- gsub(" ","/",df$Birth_Date)
+df$Birth_Date <- as.Date(df$Birth_Date, "%m/%d/%Y")
+df$Birth_Date[is.na(df$Birth_Date)] <-'1900-01-01'
+
+
+#Loan_Date Format
+df$Loan_Date <- cleanDate(df$Loan_Date)
+
+#Credit_Score format
+##Replace 0 with NAs
+df$Credit_Score[df$Credit_Score==0] <- NA
+
+#Remove Orig_APR
+df = subset(df, select = -c(Orig_APR))
+
+#Int_Rate
+##Check for rates reflected as decimals
+df$Int_Rate[df$Int_Rate < 1 & df$Int_Rate > 0]
+##Convert to percent
+df$Int_Rate <- df$Int_Rate/100
+##Make 0 rates NAs
+df$Int_Rate[df$Int_Rate==0] <- NA
+
+#Combine Loan_Type and C_O_Orig_Loan_Type
+df$Loan_Type[df$Loan_Type=="Charged Off Loan"] <- df$C_O_Orig_Loan_Type[df$Loan_Type!="Charged Off Loan"]
+
+##make Loan Type Category: Loan_Type_Cat
+df$Loan_Type_Cat <- df$Loan_Type
+df$Loan_Type_Cat[df$Loan_Type %in% c("Signature","Signature (25)","ALM")]<-"Unsecured"
+df$Loan_Type_Cat[df$Loan_Type %in% c("Unsecured LOC","Unsecured LOC (76)","Promotional LOC")]<-"LOC"
+df$Loan_Type_Cat[df$Loan_Type == "CUDL New Vehicle"]<-"New Auto Dealer"
+df$Loan_Type_Cat[df$Loan_Type == "CUDL Used Vehicle"]<-"Used Auto Dealer"
+df$Loan_Type_Cat[df$Loan_Type %in% c("Used Autos and Truck","Used Vehicle (28)","Rate Recapture Pgrm")]<-"Used Auto In House"
+df$Loan_Type_Cat[df$Loan_Type %in% c("New Autos and Truck","New Autos and Trucks","New Vehicle (27)")]<-"New Auto In House"
+df$Loan_Type_Cat[df$Loan_Type == "Home Equity (98)","Home Equity One"]<-"HELOC"
+df$Loan_Type_Cat[df$Loan_Type==""]<-NA
+
+df$Secured <- NA
+df$Secured[df$Loan_Type_Cat%in%c("Unsecured","LOC","STS Loan","Flex Loan (57)")] <- 0
+df$Secured[df$Loan_Type_Cat%in%c("Real Estate 2nd","Share Secured $ (42)","Home Equity (98)","Share Secured (02)","Home Equity One","New Auto Dealer","Used Auto Dealer","Used Auto In House","New Auto In House","HELOC")] <- 1
+
+#Marital_Status
+table(df$Marital_Status)
+
+#Remove Loan_Type, C_O_Orig_Loan_Type
+df = subset(df, select = -c(Loan_Type, C_O_Orig_Loan_Type))
+
+#ln_cur_Bal
+length(df$Ln_Cur_Bal[(df$Chg_Off_Dt != "  /  /") & (df$Ln_Cur_Bal!=0)])
+
+df$Chg_Off_Amt[(df$Chg_Off_Dt != "  /  /") & (df$Ln_Cur_Bal!=0)]
+
+#Create new field: Ln_Bal to reflect balance of loans when charged-off
+df$Ln_Bal <- df$Ln_Cur_Bal
+df$Ln_Bal[(df$Chg_Off_Dt != "  /  /") & !is.na(df$Chg_Off_Amt)] <- df$Chg_Off_Amt[(df$Chg_Off_Dt != "  /  /") & !is.na(df$Chg_Off_Amt)]
+
+#Remove Ln_Cur_Bal
+df = subset(df, select = -c(Ln_Cur_Bal))
+
+#Paymts_left
+df$Paymts_Left[(df$Chg_Off_Dt != "  /  /")]
+##No useful observations; all 0 for charged-off loans
+#Remove Paymts_Left
+df = subset(df, select = -c(Paymts_Left))
+
+#Remove Occupation_1
+df = subset(df, select = -c(Occupation_1))
+
+#Remove Begin_Date
+length(df$Begin_Date[df$Begin_Date!= "  /  /"])
+df = subset(df, select = -c(Begin_Date))
+
+#Remove End_Date
+length(df$Orig_Amt[df$End_Date!= "  /  /"])
+df = subset(df, select = -c(End_Date))
+
+#Join_Date
+df$Join_Date <- cleanDate(df$Join_Date) #format
+
+#Zip
+length(unique(df$Zip))
+##Reformat to first 5 characters
+df$Zip <- substr(df$Zip,1,5)
+df$Zip[nchar(df$Zip)<5] <- NA
+length(unique(df$Zip))
+
+#Gender
+df$Gender[is.na(df$Gender)]
+length(df$Gender[df$Gender=="Female"])
+length(df$Gender[df$Gender=="Male"])
+##Limit observations to observed gender, set basecase to female
+df = df[df$Gender %in% c("Female","Male"), ]
+df$Gender[df$Gender=="Female"] <- 0
+df$Gender[df$Gender=="Male"] <- 1
+df$Gender <- as.integer(df$Gender)
+
+
+#Orig_Amt
+length(df$Orig_Amt[df$Orig_Amt!=0 & df$Chg_Off_Amt!=0]) #useable
+
+#Closed_Dt
+df$Closed_Dt[df$Closed_Dt != "  /  /"]
+#Remove Closed_Dt
+df = subset(df, select = -c(Closed_Dt))
+
+#Sh_Cur_Bal
+df$Sh_Cur_Bal[df$Share_Acct_Flag==0] <- NA #Set balance for non-share account to NA
+
+
+#Creation_Date - of share account
+df$Creation_Date <- cleanDate(df$Creation_Date) #format
+length(unique(df$Creation_Date[df$Share_Acct_Flag==1 & is.na(df$Creation_Date)]))
+
+#Closed_Date - Share account
+df$Closed_Date[df$Closed_Date != "  /  /"]
+df$Closed_Date <- cleanDate(df$Closed_Date) #format
+
+length(unique(df$Closed_Date[df$Closed_Date < df$Loan_Date]))
+
+#Chg_Off_Dt
+df$Chg_Off_Dt <- cleanDate(df$Chg_Off_Dt) #format
+
+#Create Default Flag
+df$Default <- 0
+df$Default[which(!is.na(df$Chg_Off_Dt) & df$Chg_Off_Desc!="Member is deceased")] <- 1
+
+#Chg_Off_Desc
+df = subset(df, select = -c(Chg_Off_Desc))
+
+#Remove Chg_Off_Int_Due
+df = subset(df, select = -c(Chg_Off_Int_Due))
+
+#Chg_off_Amt
+
+#Remove Days_Delinq
+df = subset(df, select = -c(Days_Delinq))
+
+#Remove AMt_Delinq
+df = subset(df, select = -c(Amt_Delinq))
+
+#Lst_Pmt_Dt
+df$Lst_Pmt_Dt[df$Lst_Pmt_Dt != "  /  /"]
+#remove
+df = subset(df, select = -c(Lst_Pmt_Dt))
+
+#Auto_Process
+df$ACH <- 0
+df$ACH[df$Auto_Process=="Yes"] <- 1
+#Remove
+df = subset(df, select = -c(Auto_Process))
+
+#Closed_Date_1
+df$Share_Acct_Flag[df$Closed_Date_1 != "  /  /"]
+df$Closed_Date_1 <- cleanDate(df$Closed_Date_1) #format
+
+#D_Ratio_B
+df$D_Ratio_A_[df$Default==1]
+#D_Ratio
+df = subset(df, select = -c(D_Ratio_A_))
+df = subset(df, select = -c(D_Ratio_B_))
+
+#Loan_Collateral
+df$Loan_Collateral
+
+#No_of_Pmts - treat as loan term length
+df[df$No_of_Pmts==72,c("Loan_Date","Closed_Date_1")]
+df$Term_Est <- round(df$Orig_Amt/df$Paymt_Amt_,0)
+is.na(df[df$Term_Est > df$No_of_Pmts,c("Term_Est","No_of_Pmts")])==FALSE
+df = subset(df, select = -c(Term_Est))
+
+#Remove Paymt_Amt_
+df = subset(df, select = -c(Paymt_Amt_))
+
+#Remove Interest_Due
+df = subset(df, select = -c(Interest_Due))
+
+#Remove loans and share accounts with missing opening dates
+df <- df[(df$Share_Acct_Flag==1 & !is.na(df$Creation_Date)) | (df$Share_Acct_Flag==0 & !is.na(df$Loan_Date)),]
+
+#Create universal account open date
+df$Open_Date <- df$Loan_Date
+df$Open_Date[df$Share_Acct_Flag==1] <- df$Creation_Date[df$Share_Acct_Flag==1]
+
+df = subset(df, select = -c(Creation_Date,Loan_Date))
+
+
+for(i in unique(df[df$Open_Date < df$Join_Date,"Customer_ID"])){
+  df$Join_Date[df$Customer_ID==i] <- min(df$Open_Date[df$Customer_ID==i],na.rm=TRUE)
+}
+
+#Remove bad observations
+##Keep share accounts and loans with either non-0 number of payments or open dates that aren't the same as their charge-off
+df_paid <- df[df$Share_Acct_Flag==1 | (df$Share_Acct_Flag==0 & df$Default==0 & (df$Open_Date!=df$Closed_Date_1 | df$Open_Date!=df$Closed_Date)),]
+df_default <- df[df$Share_Acct_Flag==0 & df$Default==1 & df$Open_Date!=df$Chg_Off_Dt,]
+df <- rbind(df_paid, df_default)
+
+remove(df_paid, df_default, new_data)
+
+#Create estimate of term date of loan 
+df$Term_Date_Est <- df$Open_Date + df$No_of_Pmts*30.436875
+
+#Assign Loan Account Close Date
+##Closed date if loan is charged off
+df$Acct_Clsd_Dt <- df$Chg_Off_Dt
+##Update Closed share Accounts
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==1 & !is.na(df$Closed_Date))] <- df$Closed_Date[which(df$Share_Acct_Flag==1 & !is.na(df$Closed_Date))]
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==1)] <- df$Chg_Off_Dt[which(df$Share_Acct_Flag==0 & df$Default==1)]
+
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date==df$Closed_Date_1 & df$Closed_Date > df$Open_Date)] <- df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date==df$Closed_Date_1 & df$Closed_Date > df$Open_Date)]
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date==df$Closed_Date_1 & df$Closed_Date < df$Open_Date)] <- NA
+
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date_1 > df$Open_Date & df$Closed_Date < df$Open_Date)] <- df$Closed_Date_1[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date_1 > df$Open_Date & df$Closed_Date < df$Open_Date)]
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date > df$Open_Date & df$Closed_Date_1 < df$Open_Date)] <- df$Closed_Date[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date > df$Open_Date & df$Closed_Date_1 < df$Open_Date)]
+
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date_1 > df$Closed_Date & df$Closed_Date_1 <= df$Term_Date_Est & df$Closed_Date_1 > df$Open_Date)] <- df$Closed_Date_1[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date_1 > df$Closed_Date & df$Closed_Date_1 <= df$Term_Date_Est & df$Closed_Date_1 > df$Open_Date)]
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date > df$Closed_Date_1 & df$Closed_Date <= df$Term_Date_Est & df$Closed_Date > df$Open_Date)] <- df$Closed_Date[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date > df$Closed_Date_1 & df$Closed_Date <= df$Term_Date_Est & df$Closed_Date > df$Open_Date)]
+
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & is.na(df$Closed_Date) & df$Closed_Date_1 > df$Open_Date)] <- df$Closed_Date_1[which(df$Share_Acct_Flag==0 & df$Default==0 & is.na(df$Closed_Date) & df$Closed_Date_1 > df$Open_Date)]
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & is.na(df$Closed_Date_1) & df$Closed_Date > df$Open_Date)] <- df$Closed_Date[which(df$Share_Acct_Flag==0 & df$Default==0 & is.na(df$Closed_Date_1) & df$Closed_Date > df$Open_Date)]
+
+#Subset to final columns
+df <- df[, c("Customer_ID","Join_Date","Cond_1","Work_Phone_No","Home_Phone_No","Email_Addr","Birth_Date","Gender","Credit_Score","Marital_Status"
+                ,"Share_Acct_Flag","Account_Number","Orig_Amt","Loan_Type_Cat","Secured","Open_Date","Ln_Bal","Acct_Clsd_Dt","Default","No_of_Pmts","ACH","Has_Cosigner")]
+
+df <- unique(df)
+setwd(file_path_data)
+write.csv(df, "loan_data_clean.csv",row.names=FALSE)
+rm(cleanDate)
