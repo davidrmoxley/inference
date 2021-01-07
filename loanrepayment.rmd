@@ -1,16 +1,54 @@
-############################################################
-##                                                        ##
-##                    Data Cleanse                        ##
-##                                                        ##
-############################################################
+---
+title: "Loan Default Probability Modeling"
+author: David R. Moxley
+output: rmarkdown::github_document
+header-includes: 
+  \usepackage{float}
+  \usepackage{mathtools}
+---
 
-library(dplyr)
 
-file_path_data <- "C:/Users/dmoxley/OneDrive - Impact Makers/Pro Bono/RHFCU/Datasets"
-setwd(file_path_data)
-df <- read.csv(paste0("loan_data_clear.csv"))
+# Overview
 
-#Clean up dates
+This project follows the work done in a pro bono engagement with a community credit union to reduce their overall loan portfolio risk. Central to that effort was the development of a loan default probability model which combined unique feature development based on economic theory and evaluated traditional industry models with econometric solutions and cutting edge models in the realm of explainable machine learning.
+
+
+# The Business
+
+The community credit union suffered fr
+
+
+# The Theory
+
+
+[Insert from paper]
+
+
+[Add charts of utility curves]
+
+
+# The Data
+
+The dataset provided consisted over fewer than 9,000 observations and had numerous data quality issues. 
+
+[Insert from paper]
+
+
+## Data Cleansing
+
+Data formatting issues were abundant, duplicates columns required extensive analysis to determine business intent, and missingness of values threatened to limit the sample size an already small dataset.
+
+```{r, echo=FALSE}
+df <- read.csv(paste0("https://raw.githubusercontent.com/davidrmoxley/inference/main/loanrepayment_data_clear.csv"))
+head(df[3:9])
+```
+
+First, date columns were addressed. In addition to removing unused date fields and standardizing formats, logical checks needed to be applied.
+
+```{r, echo=FALSE}
+###     Clean up dates      ###
+df = subset(df, select = -c(Begin_Date,End_Date,Closed_Dt,Lst_Pmt_Dt)) # Remove unused date fields
+
 cleanDate <- function(date_col){
   #given date column from RHFCU file, clean broken dates and return formated date
   c <- gsub("/"," ",date_col)
@@ -20,36 +58,49 @@ cleanDate <- function(date_col){
   return(c)
 }
 
-# Clean-Up Birth_Date
+df$Join_Date <- cleanDate(df$Join_Date)
+df$Closed_Date <- cleanDate(df$Closed_Date)
+df$Closed_Date_1 <- cleanDate(df$Closed_Date_1)
+df$Chg_Off_Date <- cleanDate(df$Chg_Off_Dt)
+df$Open_Date <- cleanDate(df$Open_Date)
+
+# Manually clean-Up Birth_Date
 df$Birth_Date <- gsub("/"," ",df$Birth_Date)
 df$Birth_Date <- trimws(df$Birth_Date, which = c("right"), whitespace = "[ \t\r\n]")
 df$Birth_Date <- gsub(" ","/",df$Birth_Date)
 df$Birth_Date <- as.Date(df$Birth_Date, "%m/%d/%Y")
 df$Birth_Date[is.na(df$Birth_Date)] <-'1900-01-01'
+```
+
+For example, *Join_Date*, the date on which a member joined the credit union logically needed to precede their oldest account *Open_Date*. This was not always the case and needed to be corrected in the dataset.
+
+```{r, echo=TRUE}
+# Ensure logical Join_Date of customer relative to account open_date
+for(i in unique(df[df$Open_Date < df$Join_Date,"Customer_ID"])){
+  df$Join_Date[df$Customer_ID==i] <- min(df$Open_Date[df$Customer_ID==i],na.rm=TRUE)
+}
+```
 
 
-#Loan_Date Format
-df$Loan_Date <- cleanDate(df$Loan_Date)
+Of the remaining fields, basic data conforming was performed (e.g. conversion of interest rates -- *Int_Rate* -- to proportions), duplicate fields were merged for completeness, and irrelevant fields were dropped from the dataset. Binary categorical variables were converted to dummy variables and loan types (*Loan_Type*) were converted into broader loan categories (*Loan_Type_Cat*) based on the credit union's practices and a secured loan flag (*secured*) was added to the dataset.
 
-#Credit_Score format
-##Replace 0 with NAs
+```{r, echo=FALSE}
+##    Conform data   ##
+df$Int_Rate <- df$Int_Rate/100 # convert to proportion
 df$Credit_Score[df$Credit_Score==0] <- NA
-
-#Remove Orig_APR
-df = subset(df, select = -c(Orig_APR))
-
-#Int_Rate
-##Check for rates reflected as decimals
-df$Int_Rate[df$Int_Rate < 1 & df$Int_Rate > 0]
-##Convert to percent
-df$Int_Rate <- df$Int_Rate/100
-##Make 0 rates NAs
 df$Int_Rate[df$Int_Rate==0] <- NA
+df$Sh_Cur_Bal[df$Share_Acct_Flag==0] <- NA
 
-#Combine Loan_Type and C_O_Orig_Loan_Type
-df$Loan_Type[df$Loan_Type=="Charged Off Loan"] <- df$C_O_Orig_Loan_Type[df$Loan_Type!="Charged Off Loan"]
+##  Merge fields with duplicate information   ##
+df$Loan_Type[df$Loan_Type=="Charged Off Loan"] <- df$C_O_Orig_Loan_Type[df$Loan_Type=="Charged Off Loan"]
 
-##make Loan Type Category: Loan_Type_Cat
+df$Ln_Bal <- df$Ln_Cur_Bal
+df$Ln_Bal[is.na(df$Chg_Off_Date)==FALSE & !is.na(df$Chg_Off_Amt)] <- df$Chg_Off_Amt[(is.na(df$Chg_Off_Date)==FALSE) & !is.na(df$Chg_Off_Amt)]
+```
+
+```{r, echo=TRUE}
+###     Create New features     ###
+# Loan Type Category
 df$Loan_Type_Cat <- df$Loan_Type
 df$Loan_Type_Cat[df$Loan_Type %in% c("Signature","Signature (25)","ALM")]<-"Unsecured"
 df$Loan_Type_Cat[df$Loan_Type %in% c("Unsecured LOC","Unsecured LOC (76)","Promotional LOC")]<-"LOC"
@@ -57,179 +108,60 @@ df$Loan_Type_Cat[df$Loan_Type == "CUDL New Vehicle"]<-"New Auto Dealer"
 df$Loan_Type_Cat[df$Loan_Type == "CUDL Used Vehicle"]<-"Used Auto Dealer"
 df$Loan_Type_Cat[df$Loan_Type %in% c("Used Autos and Truck","Used Vehicle (28)","Rate Recapture Pgrm")]<-"Used Auto In House"
 df$Loan_Type_Cat[df$Loan_Type %in% c("New Autos and Truck","New Autos and Trucks","New Vehicle (27)")]<-"New Auto In House"
-df$Loan_Type_Cat[df$Loan_Type == "Home Equity (98)","Home Equity One"]<-"HELOC"
+df$Loan_Type_Cat[df$Loan_Type %in% c("Home Equity (98)","Home Equity One")]<-"HELOC"
 df$Loan_Type_Cat[df$Loan_Type==""]<-NA
+```
 
+```{r, echo=FALSE}
+##  Dummy variables   ##
+# Secured Loans
 df$Secured <- NA
 df$Secured[df$Loan_Type_Cat%in%c("Unsecured","LOC","STS Loan","Flex Loan (57)")] <- 0
-df$Secured[df$Loan_Type_Cat%in%c("Real Estate 2nd","Share Secured $ (42)","Home Equity (98)","Share Secured (02)","Home Equity One","New Auto Dealer","Used Auto Dealer","Used Auto In House","New Auto In House","HELOC")] <- 1
+df$Secured[df$Loan_Type_Cat%in%c("Real Estate 2nd","Share Secured $ (42)","Share Secured (02)","New Auto Dealer","Used Auto Dealer","Used Auto In House","New Auto In House","HELOC")] <- 1
 
-#Marital_Status
-table(df$Marital_Status)
-
-#Remove Loan_Type, C_O_Orig_Loan_Type
-df = subset(df, select = -c(Loan_Type, C_O_Orig_Loan_Type))
-
-#ln_cur_Bal
-length(df$Ln_Cur_Bal[(df$Chg_Off_Dt != "  /  /") & (df$Ln_Cur_Bal!=0)])
-
-df$Chg_Off_Amt[(df$Chg_Off_Dt != "  /  /") & (df$Ln_Cur_Bal!=0)]
-
-#Create new field: Ln_Bal to reflect balance of loans when charged-off
-df$Ln_Bal <- df$Ln_Cur_Bal
-df$Ln_Bal[(df$Chg_Off_Dt != "  /  /") & !is.na(df$Chg_Off_Amt)] <- df$Chg_Off_Amt[(df$Chg_Off_Dt != "  /  /") & !is.na(df$Chg_Off_Amt)]
-
-#Remove Ln_Cur_Bal
-df = subset(df, select = -c(Ln_Cur_Bal))
-
-#Paymts_left
-df$Paymts_Left[(df$Chg_Off_Dt != "  /  /")]
-##No useful observations; all 0 for charged-off loans
-#Remove Paymts_Left
-df = subset(df, select = -c(Paymts_Left))
-
-#Remove Occupation_1
-df = subset(df, select = -c(Occupation_1))
-
-#Remove Begin_Date
-length(df$Begin_Date[df$Begin_Date!= "  /  /"])
-df = subset(df, select = -c(Begin_Date))
-
-#Remove End_Date
-length(df$Orig_Amt[df$End_Date!= "  /  /"])
-df = subset(df, select = -c(End_Date))
-
-#Join_Date
-df$Join_Date <- cleanDate(df$Join_Date) #format
-
-#Zip
-length(unique(df$Zip))
-##Reformat to first 5 characters
-df$Zip <- substr(df$Zip,1,5)
-df$Zip[nchar(df$Zip)<5] <- NA
-length(unique(df$Zip))
-
-#Gender
-df$Gender[is.na(df$Gender)]
-length(df$Gender[df$Gender=="Female"])
-length(df$Gender[df$Gender=="Male"])
-##Limit observations to observed gender, set basecase to female
-df = df[df$Gender %in% c("Female","Male"), ]
+# Gender
+df$Gender[!df$Gender %in% c("Female","Male")] <- NA
 df$Gender[df$Gender=="Female"] <- 0
 df$Gender[df$Gender=="Male"] <- 1
 df$Gender <- as.integer(df$Gender)
 
-
-#Orig_Amt
-length(df$Orig_Amt[df$Orig_Amt!=0 & df$Chg_Off_Amt!=0]) #useable
-
-#Closed_Dt
-df$Closed_Dt[df$Closed_Dt != "  /  /"]
-#Remove Closed_Dt
-df = subset(df, select = -c(Closed_Dt))
-
-#Sh_Cur_Bal
-df$Sh_Cur_Bal[df$Share_Acct_Flag==0] <- NA #Set balance for non-share account to NA
-
-
-#Creation_Date - of share account
-df$Creation_Date <- cleanDate(df$Creation_Date) #format
-length(unique(df$Creation_Date[df$Share_Acct_Flag==1 & is.na(df$Creation_Date)]))
-
-#Closed_Date - Share account
-df$Closed_Date[df$Closed_Date != "  /  /"]
-df$Closed_Date <- cleanDate(df$Closed_Date) #format
-
-length(unique(df$Closed_Date[df$Closed_Date < df$Loan_Date]))
-
-#Chg_Off_Dt
-df$Chg_Off_Dt <- cleanDate(df$Chg_Off_Dt) #format
-
-#Create Default Flag
+# Create Default Flag
 df$Default <- 0
-df$Default[which(!is.na(df$Chg_Off_Dt) & df$Chg_Off_Desc!="Member is deceased")] <- 1
+df$Default[which(!is.na(df$Chg_Off_Date) & df$Chg_Off_Desc!="Member is deceased")] <- 1
 
-#Chg_Off_Desc
-df = subset(df, select = -c(Chg_Off_Desc))
-
-#Remove Chg_Off_Int_Due
-df = subset(df, select = -c(Chg_Off_Int_Due))
-
-#Chg_off_Amt
-
-#Remove Days_Delinq
-df = subset(df, select = -c(Days_Delinq))
-
-#Remove AMt_Delinq
-df = subset(df, select = -c(Amt_Delinq))
-
-#Lst_Pmt_Dt
-df$Lst_Pmt_Dt[df$Lst_Pmt_Dt != "  /  /"]
-#remove
-df = subset(df, select = -c(Lst_Pmt_Dt))
-
-#Auto_Process
+# ACH
 df$ACH <- 0
 df$ACH[df$Auto_Process=="Yes"] <- 1
-#Remove
-df = subset(df, select = -c(Auto_Process))
 
-#Closed_Date_1
-df$Share_Acct_Flag[df$Closed_Date_1 != "  /  /"]
-df$Closed_Date_1 <- cleanDate(df$Closed_Date_1) #format
-
-#D_Ratio_B
-df$D_Ratio_A_[df$Default==1]
-#D_Ratio
-df = subset(df, select = -c(D_Ratio_A_))
-df = subset(df, select = -c(D_Ratio_B_))
-
-#Loan_Collateral
-df$Loan_Collateral
-
-#No_of_Pmts - treat as loan term length
-df[df$No_of_Pmts==72,c("Loan_Date","Closed_Date_1")]
-df$Term_Est <- round(df$Orig_Amt/df$Paymt_Amt_,0)
-is.na(df[df$Term_Est > df$No_of_Pmts,c("Term_Est","No_of_Pmts")])==FALSE
-df = subset(df, select = -c(Term_Est))
-
-#Remove Paymt_Amt_
-df = subset(df, select = -c(Paymt_Amt_))
-
-#Remove Interest_Due
-df = subset(df, select = -c(Interest_Due))
-
-#Remove loans and share accounts with missing opening dates
-df <- df[(df$Share_Acct_Flag==1 & !is.na(df$Creation_Date)) | (df$Share_Acct_Flag==0 & !is.na(df$Loan_Date)),]
-
-#Create universal account open date
-df$Open_Date <- df$Loan_Date
-df$Open_Date[df$Share_Acct_Flag==1] <- df$Creation_Date[df$Share_Acct_Flag==1]
-
-df = subset(df, select = -c(Creation_Date,Loan_Date))
+# Remove unused columns
+df = subset(df, select = -c(Ln_Cur_Bal,Loan_Type, C_O_Orig_Loan_Type,Auto_Process,Paymt_Amt_,Interest_Due,Orig_APR,Paymts_Left,Chg_Off_Desc,Days_Delinq,Chg_Off_Int_Due,Days_Delinq,Amt_Delinq,D_Ratio_A_,D_Ratio_B_))
+```
 
 
-for(i in unique(df[df$Open_Date < df$Join_Date,"Customer_ID"])){
-  df$Join_Date[df$Customer_ID==i] <- min(df$Open_Date[df$Customer_ID==i],na.rm=TRUE)
-}
+While most observations had logical remedies, one account had to be removed due to an account opening date (*Open_Date*) that was the same as its charge-off date (*Chg_Off_Date*) with no information available with which to logically impute a replacement value.
 
-#Remove bad observations
-##Keep share accounts and loans with either non-0 number of payments or open dates that aren't the same as their charge-off
+```{r,echo=FALSE}
+###     Remove Bad Observations     ###
+# Remove the 1 account with either non-0 number of payments or open dates that aren't the same as their charge-off
 df_paid <- df[df$Share_Acct_Flag==1 | (df$Share_Acct_Flag==0 & df$Default==0 & (df$Open_Date!=df$Closed_Date_1 | df$Open_Date!=df$Closed_Date)),]
-df_default <- df[df$Share_Acct_Flag==0 & df$Default==1 & df$Open_Date!=df$Chg_Off_Dt,]
+df_default <- df[df$Share_Acct_Flag==0 & df$Default==1 & df$Open_Date!=df$Chg_Off_Date,]
 df <- rbind(df_paid, df_default)
+remove(df_paid, df_default)
+```
 
-remove(df_paid, df_default, new_data)
+The last step of the data cleansing process was to derive a logical, uniform account close date for share accounts, loan accounts, and charged-off loan accounts.
 
-#Create estimate of term date of loan 
-df$Term_Date_Est <- df$Open_Date + df$No_of_Pmts*30.436875
+```{r, echo=FALSE}
+#  Create estimate of term date of loan 
+df$Term_Date_Est <- df$Open_Date + df$No_of_Pmts*30.436875 # No_of_Pmts - treat as loan term length
 
-#Assign Loan Account Close Date
-##Closed date if loan is charged off
-df$Acct_Clsd_Dt <- df$Chg_Off_Dt
-##Update Closed share Accounts
+###   Derive Loan Account Close Date      ###
+# Closed date if loan is charged off
+df$Acct_Clsd_Dt <- df$Chg_Off_Date
+
+# Update Closed share Accounts
 df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==1 & !is.na(df$Closed_Date))] <- df$Closed_Date[which(df$Share_Acct_Flag==1 & !is.na(df$Closed_Date))]
-df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==1)] <- df$Chg_Off_Dt[which(df$Share_Acct_Flag==0 & df$Default==1)]
+df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==1)] <- df$Chg_Off_Date[which(df$Share_Acct_Flag==0 & df$Default==1)]
 
 df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date==df$Closed_Date_1 & df$Closed_Date > df$Open_Date)] <- df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date==df$Closed_Date_1 & df$Closed_Date > df$Open_Date)]
 df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date==df$Closed_Date_1 & df$Closed_Date < df$Open_Date)] <- NA
@@ -243,11 +175,101 @@ df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & df$Closed_Date > d
 df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & is.na(df$Closed_Date) & df$Closed_Date_1 > df$Open_Date)] <- df$Closed_Date_1[which(df$Share_Acct_Flag==0 & df$Default==0 & is.na(df$Closed_Date) & df$Closed_Date_1 > df$Open_Date)]
 df$Acct_Clsd_Dt[which(df$Share_Acct_Flag==0 & df$Default==0 & is.na(df$Closed_Date_1) & df$Closed_Date > df$Open_Date)] <- df$Closed_Date[which(df$Share_Acct_Flag==0 & df$Default==0 & is.na(df$Closed_Date_1) & df$Closed_Date > df$Open_Date)]
 
-#Subset to final columns
-df <- df[, c("Customer_ID","Join_Date","Cond_1","Work_Phone_No","Home_Phone_No","Email_Addr","Birth_Date","Gender","Credit_Score","Marital_Status"
-                ,"Share_Acct_Flag","Account_Number","Orig_Amt","Loan_Type_Cat","Secured","Open_Date","Ln_Bal","Acct_Clsd_Dt","Default","No_of_Pmts","ACH","Has_Cosigner")]
+```
 
-df <- unique(df)
-setwd(file_path_data)
-write.csv(df, "loan_data_clean.csv",row.names=FALSE)
-rm(cleanDate)
+Records which had been duplicated by the client's joint compiling of share and loan accounts were removed and a dataset of 4,221 accounts was now usable for analysis.
+
+
+## Constructing the target variable
+
+Our ultimate objective was to quantify the risk of default in credit union's portfolio at any point in time. This require manipulation of our dataset to reflect observations of the loans through time. Time variant characteristics of the loan and the borrower needed to be simulated - this included our key feature of the borrower's personal relationship with the credit union.
+
+To do this, we created an algorithm to match credit union members with members of their own household and reconstructed the 35 years of loan and member history for the credit union.
+
+### Householding
+
+Known household matches within the loan portfolio (i.e. identified marital relationships or parental relationships with non-minors) would provide an incomplete picture of a borrower's personal relationship with the credit union, a proxy variable needed to be derived. This was accomplished using a deterministic household matching process to link account holders to other account holders by grouping them into households based on the following criteria:
+
+(1) Same last name and street address.
+(2) Same phone number
+(3) Same email address
+(4) Primary or Secondary Account Holder or Cosigner on the same account
+
+An additional criteria groups individuals into the same household through a "chained" match. In this scenario, Person A would be matched to the same household as Person B through criteria four (4), but both Person A and Person B matched to the same household through a third person, Person C.
+
+
+```{r, echo=FALSE}
+function_assign_household <- function(df,current_date){
+####        df must have Last_Name, Address, Home_Phone_No, Email_Addr & Account_Number       ####
+  
+  
+  ###     Match Households by Condition     ###
+  
+  ##    Condition 1: physical household match   ##
+  df <- df %>% mutate(Condition_1 = as.integer(factor(Cond_1)))
+  df$Condition_1 <- df$Condition_1 + 100000
+  df = subset(df, select = -c(Cond_1))
+  
+  ##    Condition 2: Same phone number    ##
+  df <- df %>% mutate(Condition_2 = as.integer(factor(Home_Phone_No)))
+  df$Condition_2 <- df$Condition_2 + 200000
+  df = subset(df, select = -c(Home_Phone_No))
+  
+  ##    Condition 3: Same email address   ##
+  df$Email_Addr <- tolower(df$Email_Addr)
+  df <- df %>% mutate(Condition_3 = as.integer(factor(Email_Addr)))
+  df$Condition_3 <- df$Condition_3 + 300000
+  df = subset(df, select = -c(Email_Addr))
+  
+  ##    Condition 4: Primary or Secondary Account Holder or Cosigner on the same account    ##
+  temp <- df[which(df$Open_Date<=current_date),] %>% mutate(Condition_4 = as.integer(factor(Account_Number)))
+  df[which(df$Open_Date<=current_date),"Condition_4"] <- temp$Condition_4
+  df$Condition_4 <- df$Condition_4 + 400000
+
+  
+  ###     Assign Householdcode      ###
+  
+  ##    Check number of records per condition   ##
+  df <- merge(df,data.frame(df %>% group_by(Condition_1) %>% summarize(Cond_1_Cnt = n_distinct(Customer_ID,na.rm=TRUE))))
+  df <- merge(df,data.frame(df %>% group_by(Condition_2) %>% summarize(Cond_2_Cnt = n_distinct(Customer_ID,na.rm=TRUE))))
+  df <- merge(df,data.frame(df %>% group_by(Condition_3) %>% summarize(Cond_3_Cnt = n_distinct(Customer_ID,na.rm=TRUE))))
+  df <- merge(df,data.frame(df %>% group_by(Condition_4) %>% summarize(Cond_4_Cnt = n_distinct(Customer_ID,na.rm=TRUE))))
+  
+  df$Cond_1_Cnt[is.na(df$Condition_1)] <- NA
+  df$Cond_2_Cnt[is.na(df$Condition_2)] <- NA
+  df$Cond_3_Cnt[is.na(df$Condition_3)] <- NA
+  df$Cond_4_Cnt[is.na(df$Condition_4)] <- NA
+  
+  
+  ##    Default is Condition 1, same name and address   ##
+  df$Household_Cd <- paste0("H",df$Condition_1)
+  
+  ##  Update to Condition 2 if more individuals are matched   ##
+  df$Household_Cd[which(df$Cond_2_Cnt>df$Cond_1_Cnt & !is.na(df$Condition_2))] <- paste0("H",df$Condition_2[which(df$Cond_2_Cnt>df$Cond_1_Cnt & !is.na(df$Condition_2))])
+  
+  ##  Update to Condition 3 if more individuals are matched   ##
+  df$Household_Cd[which(df$Cond_3_Cnt>df$Cond_2_Cnt & df$Cond_3_Cnt>df$Cond_1_Cnt & !is.na(df$Condition_3))] <- paste0("H",df$Condition_2[which(df$Cond_3_Cnt>df$Cond_2_Cnt & df$Cond_3_Cnt>df$Cond_1_Cnt & !is.na(df$Condition_3))])
+  
+  ##  Update to Condition 4 if more individuals are matched   ##
+  df$Household_Cd[which(df$Cond_4_Cnt>df$Cond_3_Cnt & df$Cond_4_Cnt>df$Cond_2_Cnt & df$Cond_4_Cnt>df$Cond_1_Cnt & !is.na(df$Condition_4))] <- paste0("H",df$Condition_2[which(df$Cond_4_Cnt>df$Cond_3_Cnt & df$Cond_4_Cnt>df$Cond_2_Cnt & df$Cond_4_Cnt>df$Cond_1_Cnt & !is.na(df$Condition_4))])
+  
+  df = subset(df, select = -c(Condition_4, Condition_3, Condition_2, Condition_1, Cond_1_Cnt, Cond_2_Cnt, Cond_3_Cnt, Cond_4_Cnt))
+  
+  #Add count of unique members of household
+  df <- merge(df,data.frame(df %>% group_by(Household_Cd) %>% summarize(Household_Cnt = n_distinct(Customer_ID,na.rm=TRUE))))
+  
+  #Calculate Tenure
+  df$Household_Tenure_Yrs <- round(with(df, difftime(current_date, Join_Date, units = "days"))/365.25,2)
+  customer_years <- unique(df[df$Household_Tenure_Yrs>0,c("Household_Cd","Customer_ID","Household_Tenure_Yrs")])
+  df <- merge(df,data.frame(customer_years %>% group_by(Household_Cd) %>% summarize(Household_Tenure = sum(Household_Tenure_Yrs,na.rm=TRUE))))
+  
+  return(df)
+}
+```
+
+
+
+
+
+
+
